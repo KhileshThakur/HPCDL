@@ -1,0 +1,68 @@
+#include <iostream>
+#include <cuda_runtime.h>
+using namespace std;
+
+#define N 3
+
+// CUDA Kernel for Matrix Multiplication
+__global__ void matrixMul(int *a, int *b, int *c) {
+    int row = threadIdx.y; // 0,1,2
+    int col = threadIdx.x; // 0,1,2
+    int sum = 0;
+
+    for (int k = 0; k < N; ++k) {
+        sum += a[row * N + k] * b[k * N + col];
+    }
+
+    c[row * N + col] = sum;
+}
+
+int main() {
+    int a[N*N] = {
+        1, 2, 3,
+        4, 5, 6,
+        7, 8, 9
+    };
+
+    int b[N*N] = {
+        9, 8, 7,
+        6, 5, 4,
+        3, 2, 1
+    };
+
+    int c[N*N]; // Result matrix
+
+    int *d_a, *d_b, *d_c;
+
+    // Allocate memory on GPU
+    cudaMalloc((void**)&d_a, N*N*sizeof(int));
+    cudaMalloc((void**)&d_b, N*N*sizeof(int));
+    cudaMalloc((void**)&d_c, N*N*sizeof(int));
+
+    // Copy data from CPU to GPU
+    cudaMemcpy(d_a, a, N*N*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_b, b, N*N*sizeof(int), cudaMemcpyHostToDevice);
+
+    // Launch kernel with 2D block of threads (3x3 = 9 threads)
+    dim3 threadsPerBlock(N, N);
+    matrixMul<<<1, threadsPerBlock>>>(d_a, d_b, d_c);
+
+    // Copy result back to CPU
+    cudaMemcpy(c, d_c, N*N*sizeof(int), cudaMemcpyDeviceToHost);
+
+    // Print result
+    cout << "Result Matrix:\n";
+    for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < N; ++j) {
+            cout << c[i * N + j] << " ";
+        }
+        cout << endl;
+    }
+
+    // Free GPU memory
+    cudaFree(d_a);
+    cudaFree(d_b);
+    cudaFree(d_c);
+
+    return 0;
+}
