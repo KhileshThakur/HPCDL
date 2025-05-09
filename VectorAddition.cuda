@@ -1,0 +1,48 @@
+#include <iostream>
+#include <cuda_runtime.h>
+using namespace std;
+
+// GPU Kernel for vector addition
+__global__ void addVectors(int *a, int *b, int *c, int n) {
+    int i = threadIdx.x;
+    if (i < n) {
+        c[i] = a[i] + b[i];
+    }
+}
+
+int main() {
+    const int N = 5;
+    int a[N] = {1, 2, 3, 4, 5};
+    int b[N] = {10, 20, 30, 40, 50};
+    int c[N];  // Result array
+
+    int *d_a, *d_b, *d_c;
+
+    // Step 1: Allocate memory on GPU
+    cudaMalloc((void **)&d_a, N * sizeof(int));
+    cudaMalloc((void **)&d_b, N * sizeof(int));
+    cudaMalloc((void **)&d_c, N * sizeof(int));
+
+    // Step 2: Copy input data to GPU
+    cudaMemcpy(d_a, a, N * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_b, b, N * sizeof(int), cudaMemcpyHostToDevice);
+
+    // Step 3: Launch kernel with N threads
+    addVectors<<<1, N>>>(d_a, d_b, d_c, N);
+
+    // Step 4: Copy result back to CPU
+    cudaMemcpy(c, d_c, N * sizeof(int), cudaMemcpyDeviceToHost);
+
+    // Step 5: Print result
+    cout << "Result: ";
+    for (int i = 0; i < N; ++i) {
+        cout << c[i] << " ";
+    }
+
+    // Step 6: Free GPU memory
+    cudaFree(d_a);
+    cudaFree(d_b);
+    cudaFree(d_c);
+
+    return 0;
+}
