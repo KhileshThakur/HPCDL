@@ -1,48 +1,68 @@
 #include <iostream>
+#include <chrono>
 #include <cuda_runtime.h>
 using namespace std;
+using namespace chrono;
 
-// GPU Kernel for vector addition
-__global__ void addVectors(int *a, int *b, int *c, int n) {
-    int i = threadIdx.x;
-    if (i < n) {
-        c[i] = a[i] + b[i];
-    }
+__global__ void addVectorsGPU(int *a, int *b, int *c, int n) {
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    if (i < n) c[i] = a[i] + b[i];
 }
 
 int main() {
-    const int N = 5;
-    int a[N] = {1, 2, 3, 4, 5};
-    int b[N] = {10, 20, 30, 40, 50};
-    int c[N];  // Result array
+    const int N = 1000000;
+    int *a = new int[N];
+    int *b = new int[N];
+    int *c_cpu = new int[N];
+    int *c_gpu = new int[N];
 
+    // Initialize input arrays
+    for (int i = 0; i < N; i++) {
+        a[i] = i;
+        b[i] = N - i;
+    }
+
+    // ------------------- CPU Version -------------------
+    auto start_cpu = high_resolution_clock::now();
+    for (int i = 0; i < N; i++) {
+        c_cpu[i] = a[i] + b[i];
+    }
+    auto end_cpu = high_resolution_clock::now();
+    auto duration_cpu = duration_cast<milliseconds>(end_cpu - start_cpu);
+    cout << "CPU Time (ms): " << duration_cpu.count() << endl;
+
+    // ------------------- GPU Version -------------------
     int *d_a, *d_b, *d_c;
+    cudaMalloc(&d_a, N * sizeof(int));
+    cudaMalloc(&d_b, N * sizeof(int));
+    cudaMalloc(&d_c, N * sizeof(int));
 
-    // Step 1: Allocate memory on GPU
-    cudaMalloc((void **)&d_a, N * sizeof(int));
-    cudaMalloc((void **)&d_b, N * sizeof(int));
-    cudaMalloc((void **)&d_c, N * sizeof(int));
-
-    // Step 2: Copy input data to GPU
     cudaMemcpy(d_a, a, N * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_b, b, N * sizeof(int), cudaMemcpyHostToDevice);
 
-    // Step 3: Launch kernel with N threads
-    addVectors<<<1, N>>>(d_a, d_b, d_c, N);
+    cudaEvent_t start_gpu, end_gpu;
+    cudaEventCreate(&start_gpu);
+    cudaEventCreate(&end_gpu);
+    cudaEventRecord(start_gpu);
 
-    // Step 4: Copy result back to CPU
-    cudaMemcpy(c, d_c, N * sizeof(int), cudaMemcpyDeviceToHost);
+    addVectorsGPU<<<(N + 255)/256, 256>>>(d_a, d_b, d_c, N);
 
-    // Step 5: Print result
-    cout << "Result: ";
-    for (int i = 0; i < N; ++i) {
-        cout << c[i] << " ";
-    }
+    cudaEventRecord(end_gpu);
+    cudaEventSynchronize(end_gpu);
+    float time_gpu;
+    cudaEventElapsedTime(&time_gpu, start_gpu, end_gpu);
 
-    // Step 6: Free GPU memory
-    cudaFree(d_a);
-    cudaFree(d_b);
-    cudaFree(d_c);
+    cudaMemcpy(c_gpu, d_c, N * sizeof(int), cudaMemcpyDeviceToHost);
+
+    cout << "GPU Time (ms): " << time_gpu << endl;
+
+    // ------------------- Sample Output -------------------
+    cout << "Result Check: CPU[0] = " << c_cpu[0] << ", GPU[0] = " << c_gpu[0] << endl;
+    cout << "Result Check: CPU[N-1] = " << c_cpu[N-1] << ", GPU[N-1] = " << c_gpu[N-1] << endl;
+
+    // Free memory
+    delete[] a; delete[] b; delete[] c_cpu; delete[] c_gpu;
+    cudaFree(d_a); cudaFree(d_b); cudaFree(d_c);
 
     return 0;
 }
