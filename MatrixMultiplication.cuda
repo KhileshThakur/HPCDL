@@ -1,13 +1,15 @@
 #include <iostream>
 #include <cuda_runtime.h>
+#include <chrono>
 using namespace std;
+using namespace chrono;
 
-#define N 3
+#define N 3  // 3x3 matrix
 
-// CUDA Kernel for Matrix Multiplication
-__global__ void matrixMul(int *a, int *b, int *c) {
-    int row = threadIdx.y; // 0,1,2
-    int col = threadIdx.x; // 0,1,2
+// ---------------- CUDA Kernel ----------------
+__global__ void matrixMulGPU(int *a, int *b, int *c) {
+    int row = threadIdx.y;
+    int col = threadIdx.x;
     int sum = 0;
 
     for (int k = 0; k < N; ++k) {
@@ -17,49 +19,69 @@ __global__ void matrixMul(int *a, int *b, int *c) {
     c[row * N + col] = sum;
 }
 
+// ---------------- Main Function ----------------
 int main() {
-    int a[N*N] = {
-        1, 2, 3,
-        4, 5, 6,
-        7, 8, 9
-    };
+    int a[N*N] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+    int b[N*N] = {9, 8, 7, 6, 5, 4, 3, 2, 1};
+    int c_cpu[N*N], c_gpu[N*N];
 
-    int b[N*N] = {
-        9, 8, 7,
-        6, 5, 4,
-        3, 2, 1
-    };
+    // ------------ CPU Matrix Multiplication ------------
+    auto start_cpu = high_resolution_clock::now();
+    for (int row = 0; row < N; row++) {
+        for (int col = 0; col < N; col++) {
+            int sum = 0;
+            for (int k = 0; k < N; k++) {
+                sum += a[row * N + k] * b[k * N + col];
+            }
+            c_cpu[row * N + col] = sum;
+        }
+    }
+    auto end_cpu = high_resolution_clock::now();
+    auto cpu_time = duration_cast<microseconds>(end_cpu - start_cpu);
+    cout << "CPU Time (microseconds): " << cpu_time.count() << endl;
 
-    int c[N*N]; // Result matrix
-
+    // ------------ GPU Matrix Multiplication ------------
     int *d_a, *d_b, *d_c;
+    cudaMalloc(&d_a, N*N*sizeof(int));
+    cudaMalloc(&d_b, N*N*sizeof(int));
+    cudaMalloc(&d_c, N*N*sizeof(int));
 
-    // Allocate memory on GPU
-    cudaMalloc((void**)&d_a, N*N*sizeof(int));
-    cudaMalloc((void**)&d_b, N*N*sizeof(int));
-    cudaMalloc((void**)&d_c, N*N*sizeof(int));
-
-    // Copy data from CPU to GPU
     cudaMemcpy(d_a, a, N*N*sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_b, b, N*N*sizeof(int), cudaMemcpyHostToDevice);
 
-    // Launch kernel with 2D block of threads (3x3 = 9 threads)
-    dim3 threadsPerBlock(N, N);
-    matrixMul<<<1, threadsPerBlock>>>(d_a, d_b, d_c);
+    cudaEvent_t start_gpu, stop_gpu;
+    cudaEventCreate(&start_gpu);
+    cudaEventCreate(&stop_gpu);
+    cudaEventRecord(start_gpu);
 
-    // Copy result back to CPU
-    cudaMemcpy(c, d_c, N*N*sizeof(int), cudaMemcpyDeviceToHost);
+    dim3 threadsPerBlock(N, N);  // 3x3 = 9 threads
+    matrixMulGPU<<<1, threadsPerBlock>>>(d_a, d_b, d_c);
 
-    // Print result
-    cout << "Result Matrix:\n";
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            cout << c[i * N + j] << " ";
-        }
-        cout << endl;
+    cudaEventRecord(stop_gpu);
+    cudaEventSynchronize(stop_gpu);
+    float gpu_time = 0;
+    cudaEventElapsedTime(&gpu_time, start_gpu, stop_gpu);
+    cout << "GPU Time (milliseconds): " << gpu_time << endl;
+
+    cudaMemcpy(c_gpu, d_c, N*N*sizeof(int), cudaMemcpyDeviceToHost);
+
+    // ------------ Output Result ------------
+    cout << "Result Matrix (CPU):" << endl;
+    for (int i = 0; i < N*N; i++) {
+        cout << c_cpu[i] << " ";
+        if ((i + 1) % N == 0) cout << endl;
     }
 
-    // Free GPU memory
+    cout << "Result Matrix (GPU):" << endl;
+    for (int i = 0; i < N*N; i++) {
+        cout << c_gpu[i] << " ";
+        if ((i + 1) % N == 0) cout << endl;
+    }
+
+    // ------------ Show Threads Used ------------
+    cout << "Threads Used: " << N * N << " (in 3x3 grid)" << endl;
+
+    // Cleanup
     cudaFree(d_a);
     cudaFree(d_b);
     cudaFree(d_c);
